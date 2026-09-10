@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#33415c" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Cadence" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="icon" type="image/png" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>Cadence</title>
+</head>
+<body>
+  <div class="app" id="app">
+    <nav class="nav" id="nav" aria-label="Sections">
+      <div class="brand"><span class="brand-mark"></span><span class="brand-name">Cadence</span></div>
+      <button class="nav-item" data-view="today"><span class="ni-ico">◔</span><span class="ni-label">Today</span></button>
+      <button class="nav-item" data-view="week"><span class="ni-ico">▦</span><span class="ni-label">Week</span></button>
+      <button class="nav-item" data-view="shopping"><span class="ni-ico">🛒</span><span class="ni-label">Shopping</span></button>
+      <button class="nav-item" data-view="streaks"><span class="ni-ico">▮</span><span class="ni-label">Streaks</span></button>
+      <button class="nav-item" data-view="template"><span class="ni-ico">◫</span><span class="ni-label">Template</span></button>
+      <button class="nav-item" data-view="settings"><span class="ni-ico">⚙</span><span class="ni-label">Settings</span></button>
+      <div class="nav-foot"><span class="sync-pill" id="syncPill">local only</span></div>
+    </nav>
+    <main class="main" id="main"></main>
+  </div>
+
+  <div class="scrim" id="scrim" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="sync.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
