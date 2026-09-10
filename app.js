@@ -274,18 +274,28 @@
     ({ today: viewToday, week: viewWeek, shopping: viewShopping, streaks: viewStreaks, template: viewTemplate, settings: viewSettings }[app.view] || viewToday)(main);
   }
 
-  // shared header
-  function head(parent, title, sub, rightNodes) {
+  const svg = (d, extra) => {
+    const n = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    n.setAttribute("viewBox", "0 0 24 24"); n.setAttribute("fill", "none");
+    n.setAttribute("stroke", "currentColor"); n.setAttribute("stroke-width", "2");
+    n.setAttribute("stroke-linecap", "round"); n.setAttribute("stroke-linejoin", "round");
+    n.innerHTML = d; if (extra) n.setAttribute("style", extra);
+    return n;
+  };
+  const CHECK = '<path d="M20 6 9 17l-5-5"/>';
+
+  function head(parent, title, sub, right) {
     parent.append(el("div", { class: "view-head" },
       el("div", {}, el("h1", {}, title), sub && el("div", { class: "sub" }, sub)),
-      rightNodes && el("div", { class: "daynav" }, rightNodes),
+      right,
     ));
   }
-  const navBtns = (onPrev, onHome, onNext, homeLabel) => [
-    el("button", { class: "btn icon", onclick: onPrev, "aria-label": "Previous" }, "‹"),
-    el("button", { class: "btn", onclick: onHome }, homeLabel),
-    el("button", { class: "btn icon", onclick: onNext, "aria-label": "Next" }, "›"),
-  ];
+  // compact ‹ label › control
+  const stepNav = (onPrev, onHome, onNext, midLabel) =>
+    el("div", { class: "stepper" },
+      el("button", { onclick: onPrev, "aria-label": "Previous" }, svg('<path d="M15 18 9 12l6-6"/>')),
+      el("button", { class: "mid", onclick: onHome }, midLabel),
+      el("button", { onclick: onNext, "aria-label": "Next" }, svg('<path d="m9 18 6-6-6-6"/>')));
   const catStyle = (id) => `--cat: ${catColor(id)}`;
 
   // ---------------------------------------------------------------- view: today
@@ -295,13 +305,16 @@
     const { rows, counts } = reconcile(day, key);
     const view = el("div", { class: "view" });
     head(view, humanDate(key), longDate(key),
-      navBtns(() => { app.date = addDays(key, -1); render(); },
+      stepNav(() => { app.date = addDays(key, -1); render(); },
               () => { app.date = todayKey(); render(); },
               () => { app.date = addDays(key, 1); render(); }, "Today"));
 
-    view.append(el("div", { class: "drift-summary" },
-      metric("on", counts.onPlan, "on plan"), metric("off", counts.drifted, "drifted"),
-      metric("miss", counts.missed, "skipped"), metric("", counts.extra, "unplanned")));
+    const d = counts;
+    view.append(el("div", { class: "drift" },
+      el("span", { class: "on" }, el("b", {}, String(d.onPlan)), "on plan"),
+      el("span", { class: "off" }, el("b", {}, String(d.drifted)), "drifted"),
+      el("span", { class: "miss" }, el("b", {}, String(d.missed)), "skipped"),
+      el("span", {}, el("b", {}, String(d.extra)), "unplanned")));
 
     view.append(el("div", { class: "columns" },
       todayCol("Planned", "planned", day, rows, key),
@@ -312,45 +325,42 @@
     view.append(el("div", { class: "day-note" }, el("label", {}, "Day note"), ta));
     root.append(view);
   }
-  const metric = (cls, n, label) => el("div", { class: "metric " + cls }, el("b", {}, String(n)), el("span", {}, label));
 
   function todayCol(title, kind, day, rows, key) {
     const items = byStart(day[kind]);
     return el("div", { class: "card" },
       el("div", { class: "card-head" },
         el("h2", {}, title),
-        kind === "planned" && el("button", { class: "btn ghost small", onclick: () => reseedDay(key) }, "Reset to template")),
-      el("div", { class: "col-body" },
+        kind === "planned" && el("button", { class: "btn ghost small", onclick: () => reseedDay(key) }, "Reset")),
+      el("div", { class: "card-body" },
         items.length ? items.map((b) => blockRow(b, kind, rows, key))
-          : el("div", { class: "empty" }, kind === "planned" ? "Nothing planned. Set a template, or add blocks here." : "Log what actually happened as the day goes.")),
-      el("div", { class: "col-add" },
+          : el("div", { class: "empty" }, kind === "planned" ? "Nothing planned yet." : "Log sessions as the day goes.")),
+      el("div", { class: "card-foot" },
         el("button", { onclick: () => openBlockSheet({ mode: kind, dateKey: key }) },
-          kind === "planned" ? "＋  Add planned block" : "＋  Log what happened")));
+          kind === "planned" ? "Add block" : "Log a session")));
   }
 
   function blockRow(b, kind, rows, key) {
     let tag = null;
-    if (kind === "planned") {
-      const r = rows.find((r) => r.planned && r.planned.id === b.id);
-      if (r && r.kind === "matched") {
-        tag = r.status === "on" ? el("span", { class: "tag on" }, "on plan")
-          : el("span", { class: "tag " + r.status }, `${r.delta > 0 ? "+" : "−"}${fmtDur(Math.abs(r.delta))} ${r.status}`);
-      } else if (r && r.kind === "planned-only" && r.missed) tag = el("span", { class: "tag miss" }, "skipped");
-    } else {
-      const r = rows.find((r) => r.actual && r.actual.id === b.id);
-      if (r && r.kind === "actual-only") tag = el("span", { class: "tag extra" }, "unplanned");
+    const rMatch = kind === "planned" ? rows.find((r) => r.planned && r.planned.id === b.id) : rows.find((r) => r.actual && r.actual.id === b.id);
+    if (kind === "planned" && rMatch) {
+      if (rMatch.kind === "matched") {
+        tag = rMatch.status === "on" ? el("span", { class: "tag on" }, "on plan")
+          : el("span", { class: "tag " + rMatch.status }, `${rMatch.delta > 0 ? "+" : "−"}${fmtDur(Math.abs(rMatch.delta))}`);
+      } else if (rMatch.kind === "planned-only" && rMatch.missed) tag = el("span", { class: "tag miss" }, "skipped");
+    } else if (kind === "actual" && rMatch && rMatch.kind === "actual-only") {
+      tag = el("span", { class: "tag extra" }, "unplanned");
     }
-    const rMatch = kind === "planned" ? rows.find((r) => r.planned && r.planned.id === b.id) : null;
     const showDone = kind === "planned" && (!rMatch || rMatch.kind === "planned-only");
-    return el("div", { class: "block", style: catStyle(b.category), onclick: (e) => { if (!e.target.closest(".row-actions")) openBlockSheet({ mode: kind, dateKey: key, block: b }); } },
-      el("div", { class: "time" }, el("div", {}, b.start), el("div", {}, b.end)),
-      el("div", { class: "body" },
-        el("div", { class: "label" }, b.label || catName(b.category)),
-        el("div", { class: "meta" }, el("span", { class: "cat-dot" }), catName(b.category), el("span", {}, fmtDur(spanMin(b.start, b.end))), tag)),
-      el("div", { class: "row-actions" },
-        showDone && el("button", { class: "icon-btn", title: "Done now", onclick: () => markDone(b, key) }, "✓"),
-        el("button", { class: "icon-btn", title: "Edit", onclick: () => openBlockSheet({ mode: kind, dateKey: key, block: b }) }, "✎"),
-        el("button", { class: "icon-btn", title: "Remove", onclick: () => removeBlock(kind, key, b.id) }, "✕")));
+    return el("div", { class: "block", style: catStyle(b.category),
+      onclick: (e) => { if (!e.target.closest(".b-done")) openBlockSheet({ mode: kind, dateKey: key, block: b }); } },
+      el("div", { class: "b-main" },
+        el("div", { class: "b-title" }, el("span", { class: "b-label" }, b.label || catName(b.category)), tag),
+        el("div", { class: "b-meta" },
+          el("span", { class: "mono" }, fmtRange(b.start, b.end)),
+          el("span", { class: "dot" }), catName(b.category),
+          el("span", { class: "dot" }), fmtDur(spanMin(b.start, b.end)))),
+      showDone && el("button", { class: "b-done", title: "Done now", onclick: () => markDone(b, key) }, svg(CHECK)));
   }
 
   function markDone(planned, key) {
@@ -376,13 +386,12 @@
     days.forEach((k) => getDay(k));
     const view = el("div", { class: "view" });
     head(view, "Week", `${shortDate(anchor)} – ${shortDate(addDays(anchor, 6))}`,
-      navBtns(() => { app.weekAnchor = addDays(anchor, -7); render(); },
+      stepNav(() => { app.weekAnchor = addDays(anchor, -7); render(); },
               () => { app.weekAnchor = mondayOf(todayKey()); render(); },
               () => { app.weekAnchor = addDays(anchor, 7); render(); }, "This week"));
 
     const modeBtn = (m, l) => el("button", { class: app.weekMode === m ? "active" : "", onclick: () => { app.weekMode = m; render(); } }, l);
-    view.append(el("div", { class: "weekbar" },
-      el("div", { class: "seg" }, modeBtn("planned", "Planned"), modeBtn("actual", "Actual"), modeBtn("both", "Both"))));
+    view.append(el("div", { class: "seg" }, modeBtn("planned", "Planned"), modeBtn("actual", "Actual"), modeBtn("both", "Both")));
 
     view.append(isPhone() ? weekList(days) : weekGrid(days));
     root.append(view);
@@ -393,19 +402,20 @@
     for (const k of days) {
       const day = data.days[k] || { planned: [], actual: [] };
       const isToday = k === todayKey();
-      const body = el("div", { class: "wd-body" });
+      const body = el("div", { class: "wday-body" });
       const rowsToShow = [];
       if (app.weekMode !== "actual") day.planned.forEach((b) => rowsToShow.push(["plan", b]));
       if (app.weekMode !== "planned") day.actual.forEach((b) => rowsToShow.push(["act", b]));
       rowsToShow.sort((a, b) => toMin(a[1].start) - toMin(b[1].start));
-      if (!rowsToShow.length) body.append(el("div", { class: "empty", style: "padding:10px" }, "—"));
+      if (!rowsToShow.length) body.append(el("div", { class: "empty", style: "padding:8px" }, "Nothing"));
       for (const [t, b] of rowsToShow) {
-        body.append(el("div", { class: "mini-row " + (t === "plan" ? "plan" : ""), style: catStyle(b.category), onclick: () => { app.date = k; setView("today"); } },
-          el("span", { class: "mt" }, b.start), el("span", {}, b.label || catName(b.category))));
+        body.append(el("div", { class: "mini " + (t === "plan" ? "plan" : ""), style: catStyle(b.category), onclick: () => { app.date = k; setView("today"); } },
+          el("span", { class: "mt" }, b.start), el("span", { class: "mn" }, b.label || catName(b.category))));
       }
-      wrap.append(el("div", { class: "weekday-card" },
-        el("div", { class: "wd-head" + (isToday ? " today" : ""), onclick: () => { app.date = k; setView("today"); } },
-          el("b", {}, WD[jsWeekday(k)] + (isToday ? " · today" : "")), el("span", { style: "color:var(--ink-faint)" }, shortDate(k))),
+      wrap.append(el("div", { class: "wday" },
+        el("div", { class: "wday-head" + (isToday ? " today" : ""), onclick: () => { app.date = k; setView("today"); } },
+          el("b", {}, WD[jsWeekday(k)]), isToday && el("span", { style: "color:var(--accent);font-size:11px" }, "today"),
+          el("span", { class: "wd-date" }, shortDate(k))),
         body));
     }
     return wrap;
@@ -447,17 +457,17 @@
 
   function viewStreaks(root) {
     const view = el("div", { class: "view" });
-    head(view, "Streaks", "Consecutive days with at least one logged session, counting back from today");
-    const cards = el("div", { class: "cards" });
+    head(view, "Streaks", "Consecutive days with a logged session, counting back from today");
+    const cards = el("div", { class: "cards-grid" });
     for (const cat of TRACKED) {
       const s = streakFor(cat), c = CAT[cat];
-      cards.append(el("div", { class: "streak-card", style: `--cat:${c.color}` },
-        el("div", { class: "st-top" }, el("span", { class: "cat-dot" }), el("h3", {}, c.name)),
-        el("div", { class: "streak-num" }, String(s.current), el("small", {}, s.current === 1 ? " day" : " days")),
-        el("div", { class: "st-stats" },
+      cards.append(el("div", { class: "streak", style: `--cat:${c.color}` },
+        el("div", { class: "s-top" }, el("span", { class: "cat-dot" }), el("h3", {}, c.name)),
+        el("div", { class: "s-num" }, String(s.current), el("small", {}, s.current === 1 ? " day" : " days")),
+        el("div", { class: "s-stats" },
           el("div", {}, el("b", {}, String(s.longest)), "best"),
-          el("div", {}, el("b", {}, String(s.last7)), "last 7d"),
-          el("div", {}, el("b", {}, String(s.last30)), "last 30d")),
+          el("div", {}, el("b", {}, String(s.last7)), "7d"),
+          el("div", {}, el("b", {}, String(s.last30)), "30d")),
         dotStrip(cat)));
     }
     view.append(cards);
@@ -476,20 +486,27 @@
 
   function viewTemplate(root) {
     const view = el("div", { class: "view" });
-    head(view, "Weekly template", "New days start from this; editing a day afterwards never touches the template.",
-      [el("button", { class: "btn", onclick: applyTemplateForward }, "Apply this week on")]);
-    const grid = el("div", { class: "tmpl-grid" });
+    head(view, "Template", "Your default week — new days start from this.",
+      el("button", { class: "btn", onclick: applyTemplateForward }, "Apply forward"));
+    const phone = isPhone();
+    const grid = el("div", { class: "tmpl" });
     for (const wd of [1, 2, 3, 4, 5, 6, 0]) {
       const items = byStart(data.template[wd] || []);
-      grid.append(el("div", { class: "tmpl-day" },
-        el("h3", {}, WD_LONG[wd]),
-        el("div", { class: "tmpl-body" },
-          items.length ? items.map((t) => el("div", { class: "tmpl-item", style: catStyle(t.category), onclick: (e) => { if (!e.target.closest(".ti-x")) openTemplateSheet(wd, t); } },
-            el("div", { class: "ti-top" }, el("span", {}, t.label || catName(t.category)),
-              el("button", { class: "ti-x", onclick: () => { data.template[wd] = data.template[wd].filter((x) => x.id !== t.id); touch(); render(); } }, "✕")),
-            el("div", { class: "ti-time" }, fmtRange(t.start, t.end) + "  ·  " + catName(t.category))))
-            : el("div", { class: "empty", style: "padding:12px 4px" }, "—")),
-        el("button", { class: "tmpl-add", onclick: () => openTemplateSheet(wd, null) }, "＋  Add")));
+      if (phone && !items.length) {
+        grid.append(el("div", { class: "tcol slim" },
+          el("h3", {}, WD_LONG[wd]),
+          el("button", { class: "tadd", onclick: () => openTemplateSheet(wd, null) }, "＋ Add")));
+        continue;
+      }
+      grid.append(el("div", { class: "tcol" },
+        el("h3", {}, phone ? WD_LONG[wd] : WD[wd]),
+        el("div", { class: "tbody" },
+          items.length ? items.map((t) => el("div", { class: "titem", style: catStyle(t.category), onclick: (e) => { if (!e.target.closest(".tx")) openTemplateSheet(wd, t); } },
+            el("div", { class: "tt" }, el("span", {}, t.label || catName(t.category)),
+              el("button", { class: "tx", onclick: () => { data.template[wd] = data.template[wd].filter((x) => x.id !== t.id); touch(); render(); } }, "✕")),
+            el("div", { class: "tm mono" }, fmtRange(t.start, t.end))))
+            : el("div", { class: "empty", style: "padding:8px 4px" }, "—")),
+        el("button", { class: "tadd", onclick: () => openTemplateSheet(wd, null) }, "Add")));
     }
     view.append(grid);
     root.append(view);
@@ -518,79 +535,91 @@
     const list = shoppingList(anchor);
     const totals = shoppingTotals(list);
     const view = el("div", { class: "view" });
-    head(view, "Shopping", `Week of ${shortDate(anchor)} – ${shortDate(addDays(anchor, 6))}`,
-      navBtns(() => { app.shopAnchor = addDays(anchor, -7); render(); },
+    head(view, "Shopping", `${shortDate(anchor)} – ${shortDate(addDays(anchor, 6))}`,
+      stepNav(() => { app.shopAnchor = addDays(anchor, -7); render(); },
               () => { app.shopAnchor = mondayOf(todayKey()); render(); },
               () => { app.shopAnchor = addDays(anchor, 7); render(); }, "This week"));
 
     view.append(shopAddBar(anchor));
 
-    const layout = el("div", { class: "shop-layout" });
+    const wrap = el("div", { class: "shop-wrap" });
     const listEl = el("div", { class: "shop-list" });
     if (!list.items.length) {
-      listEl.append(el("div", { class: "empty" }, "Nothing on the list yet — add items above."));
+      listEl.append(el("div", { class: "empty" }, "Nothing on the list yet."));
     } else {
       const aisles = [...new Set(list.items.map((i) => i.aisle))].sort((a, b) => aisleOrder(a) - aisleOrder(b));
       for (const ai of aisles) {
         const items = list.items.filter((i) => i.aisle === ai)
           .sort((a, b) => (a.bought - b.bought) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
         const sub = items.reduce((s, it) => s + lineTotal(it), 0);
-        listEl.append(el("div", { class: "aisle-head" }, AISLE_NAME[ai] || "Other", el("span", {}, money(sub))));
+        listEl.append(el("div", { class: "aisle-h" }, AISLE_NAME[ai] || "Other", el("span", { class: "sub" }, money(sub))));
         items.forEach((it) => listEl.append(shopRow(it, anchor)));
       }
     }
-    layout.append(listEl);
-    layout.append(shopRail(anchor, totals));
-    view.append(layout);
+    wrap.append(listEl, shopRail(anchor, totals));
+    view.append(wrap);
     root.append(view);
   }
 
   function shopAddBar(key) {
-    const name = el("input", { type: "text", placeholder: "Add an item…", enterkeyhint: "done" });
+    const name = el("input", { type: "text", class: "name", placeholder: "Add an item…", enterkeyhint: "done" });
     const aisle = el("select", {}, AISLES.map(([id, n]) => el("option", { value: id }, n)));
-    const qty = el("input", { type: "text", inputmode: "decimal", value: "1" });
-    const price = el("input", { type: "text", inputmode: "decimal", placeholder: "0.00", class: "price" });
+    const price = el("input", { type: "text", class: "price", inputmode: "decimal", placeholder: "0.00" });
     const submit = () => {
       const n = name.value.trim();
       if (!n) return;
-      const q = parseAmount(qty.value); const p = parseAmount(price.value);
-      const list = shoppingList(key);
-      list.items.push({ id: uid(), name: n, aisle: aisle.value, qty: q && q > 0 ? q : 1, price: p && p > 0 ? p : 0, bought: false });
+      const p = parseAmount(price.value);
+      shoppingList(key).items.push({ id: uid(), name: n, aisle: aisle.value, qty: 1, price: p && p > 0 ? p : 0, bought: false });
       touch(); render();
-      setTimeout(() => $(".shop-add input[type=text]").focus(), 0);
+      setTimeout(() => $(".shop-add input.name")?.focus(), 0);
     };
     name.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
     price.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
     return el("div", { class: "shop-add" }, name, aisle,
-      el("div", { class: "qp" }, qty, el("span", {}, "×"), el("span", {}, data.settings.currencySymbol), price),
+      el("span", { class: "pfx" }, data.settings.currencySymbol), price,
       el("button", { class: "btn primary small", onclick: submit }, "Add"));
   }
 
   function shopRow(it, key) {
-    const commit = (patch) => {
-      const list = shoppingList(key);
-      const i = list.items.findIndex((x) => x.id === it.id);
-      if (i < 0) return;
-      Object.assign(list.items[i], patch);
-      touch();
-    };
-    const qty = el("input", { value: trimNum(it.qty), inputmode: "decimal" });
-    const price = el("input", { class: "price", value: it.price ? Number(it.price).toFixed(2) : "", placeholder: "0.00", inputmode: "decimal" });
-    const nameI = el("input", { class: "shop-name", value: it.name });
-    const lineEl = el("span", { class: "shop-line" }, money(lineTotal(it)));
-    const recompute = () => { lineEl.textContent = money((parseAmount(qty.value) || 0) * (parseAmount(price.value) || 0)); };
-    qty.addEventListener("input", recompute);
-    price.addEventListener("input", recompute);
-    nameI.addEventListener("change", () => commit({ name: nameI.value.trim() }));
-    qty.addEventListener("change", () => { const q = parseAmount(qty.value); commit({ qty: q && q >= 0 ? q : 1 }); render(); });
-    price.addEventListener("change", () => { commit({ price: Math.max(0, parseAmount(price.value) || 0) }); render(); });
-    return el("div", { class: "shop-row" + (it.bought ? " bought" : "") },
-      el("button", { class: "shop-check", "aria-label": "Bought", onclick: () => { commit({ bought: !it.bought, carried: false }); render(); } }, "✓"),
-      el("div", { class: "shop-name-wrap" }, nameI,
+    return el("div", { class: "srow" + (it.bought ? " bought" : ""), onclick: (e) => { if (!e.target.closest(".scheck")) openItemSheet(it, key); } },
+      el("button", { class: "scheck", "aria-label": "Bought", onclick: () => {
+        const l = shoppingList(key), i = l.items.findIndex((x) => x.id === it.id);
+        if (i >= 0) { l.items[i].bought = !l.items[i].bought; l.items[i].carried = false; touch(); render(); }
+      } }, svg(CHECK)),
+      el("div", { class: "sname" }, it.name || "Item",
         (it.carried && !it.bought) && el("span", { class: "tag carried" }, "last wk")),
-      el("div", { class: "shop-qp" }, qty, el("span", { class: "x" }, "×"), el("span", {}, data.settings.currencySymbol), price),
-      lineEl,
-      el("button", { class: "shop-del", "aria-label": "Delete", onclick: () => { const l = shoppingList(key); l.items = l.items.filter((x) => x.id !== it.id); touch(); render(); } }, "✕"));
+      (Number(it.qty) || 1) !== 1 && el("span", { class: "sqty" }, "×" + trimNum(it.qty)),
+      el("span", { class: "sline" }, money(lineTotal(it))));
+  }
+
+  function openItemSheet(it, key) {
+    const editing = !!it;
+    const draft = it ? { ...it } : { id: uid(), name: "", aisle: "other", qty: 1, price: 0, bought: false };
+    const nameI = el("input", { type: "text", value: draft.name, placeholder: "Item name" });
+    const aisleS = el("select", {}, AISLES.map(([id, n]) => el("option", { value: id, selected: id === draft.aisle }, n)));
+    const qtyI = el("input", { type: "text", inputmode: "decimal", value: trimNum(draft.qty) });
+    const priceI = el("input", { type: "text", inputmode: "decimal", value: draft.price ? Number(draft.price).toFixed(2) : "", placeholder: "0.00" });
+    const save = () => {
+      const l = shoppingList(key);
+      const clean = { id: draft.id, name: nameI.value.trim() || "Item", aisle: aisleS.value,
+        qty: Math.max(0, parseAmount(qtyI.value) || 1), price: Math.max(0, parseAmount(priceI.value) || 0),
+        bought: draft.bought, carried: draft.carried };
+      const i = l.items.findIndex((x) => x.id === draft.id);
+      if (i >= 0) l.items[i] = clean; else l.items.push(clean);
+      touch(); closeSheet(); render();
+    };
+    showSheet(el("div", {},
+      el("h2", {}, editing ? "Edit item" : "Add item"),
+      el("div", { class: "field" }, el("label", {}, "Name"), nameI),
+      el("div", { class: "field" }, el("label", {}, "Aisle"), aisleS),
+      el("div", { class: "field" }, el("div", { class: "times" },
+        el("div", {}, el("label", {}, "Quantity"), qtyI),
+        el("div", {}, el("label", {}, "Unit price " + data.settings.currencySymbol), priceI))),
+      el("div", { class: "sheet-actions" },
+        editing ? el("button", { class: "btn ghost small", onclick: () => { const l = shoppingList(key); l.items = l.items.filter((x) => x.id !== draft.id); touch(); closeSheet(); render(); } }, "Delete") : el("span"),
+        el("div", { class: "right" },
+          el("button", { class: "btn", onclick: closeSheet }, "Cancel"),
+          el("button", { class: "btn primary", onclick: save }, editing ? "Save" : "Add")))));
   }
 
   function shopRail(key, t) {
@@ -600,19 +629,19 @@
     return el("div", { class: "rail" },
       el("div", { class: "rail-card" },
         el("h3", {}, "This week"),
-        el("div", { class: "rail-total" }, money(t.total), el("small", {}, "list total")),
+        el("div", { class: "rail-total mono" }, money(t.total), el("small", {}, "list total")),
         el("div", { class: "rail-stats" },
-          el("div", {}, el("b", {}, money(t.basket)), "in basket"),
+          el("div", {}, el("b", { class: "mono" }, money(t.basket)), "in basket"),
           el("div", {}, el("b", {}, `${t.boughtCount}/${t.count}`), "ticked off")),
         el("div", { class: "rail-bar" }, el("i", { style: `width:${pct}%` }))),
       el("div", { class: "rail-card" },
         el("h3", {}, "Recent weeks"),
-        hist.length ? hist.map((w) => el("div", { class: "hist-row" },
-          el("div", { class: "hr-top" },
+        hist.length ? hist.map((w) => el("div", { class: "hrow" },
+          el("div", { class: "hr-t" },
             el("span", { class: w.key === key ? "cur" : "" }, weekLabel(w.key)),
             el("b", {}, money(w.total))),
-          el("div", { class: "hist-bar" + (w.key === key ? " cur" : ""), style: `width:${Math.max(3, (w.total / maxV) * 100)}%` })))
-          : el("div", { class: "empty", style: "padding:6px 0;text-align:left" }, "No past weeks yet.")));
+          el("div", { class: "hbar" + (w.key === key ? " cur" : ""), style: `width:${Math.max(3, (w.total / maxV) * 100)}%` })))
+          : el("div", { class: "empty", style: "padding:4px 0;text-align:left" }, "No past weeks yet.")));
   }
   const weekLabel = (k) => k === mondayOf(todayKey()) ? "This week" : k === addDays(mondayOf(todayKey()), -7) ? "Last week" : "w/c " + shortDate(k);
 
@@ -624,30 +653,31 @@
     head(view, "Settings");
 
     const numRow = (label, help, key, min, max, step, suffix) => {
-      const inp = el("input", { type: "number", min, max, step, value: s[key], onchange: (e) => {
-        let v = Number(e.target.value); if (!Number.isFinite(v)) v = DEFAULT_SETTINGS[key];
-        v = Math.max(min, Math.min(max, v)); s[key] = v; e.target.value = v; touch(); if (key.startsWith("day")) render();
-      } });
-      return el("div", { class: "setting" },
+      const set = (v) => { v = Math.max(min, Math.min(max, v)); s[key] = v; mid.textContent = v + suffix; touch(); if (key.startsWith("day")) render(); };
+      const mid = el("div", { class: "mid" }, s[key] + suffix);
+      return el("div", { class: "set-row" },
         el("div", {}, el("div", { class: "s-label" }, label), el("div", { class: "s-help" }, help)),
-        el("div", { style: "display:flex;align-items:center;gap:6px" }, inp, suffix && el("span", { class: "s-help" }, suffix)));
+        el("div", { class: "stepper" },
+          el("button", { onclick: () => set(s[key] - step), "aria-label": "less" }, "−"),
+          mid,
+          el("button", { onclick: () => set(s[key] + step), "aria-label": "more" }, "+")));
     };
-    const block = el("div", { class: "settings-block" },
+    const block = el("div", { class: "set-card" },
       numRow("Day starts", "First hour on the week grid.", "dayStartHour", 0, 12, 1, ":00"),
       numRow("Day ends", "Last hour on the week grid.", "dayEndHour", 13, 24, 1, ":00"),
-      numRow("Drift tolerance", "How far a start can slip before Today flags it.", "driftThresholdMin", 0, 120, 5, "min"),
-      numRow("Nudge lead time", "How long before a block a notification fires.", "nudgeLeadMin", 0, 120, 5, "min"),
-      el("div", { class: "setting" },
-        el("div", {}, el("div", { class: "s-label" }, "Desktop nudges"), el("div", { class: "s-help" }, "Notify before planned blocks while Cadence is open (needs browser permission).")),
+      numRow("Drift tolerance", "How far a start can slip before Today flags it.", "driftThresholdMin", 0, 120, 5, "m"),
+      numRow("Nudge lead time", "How long before a block a notification fires.", "nudgeLeadMin", 0, 120, 5, "m"),
+      el("div", { class: "set-row" },
+        el("div", {}, el("div", { class: "s-label" }, "Desktop nudges"), el("div", { class: "s-help" }, "Notify before planned blocks while Cadence is open.")),
         toggle(s.notificationsEnabled, async (on) => {
           if (on && "Notification" in window && Notification.permission !== "granted") {
             if (await Notification.requestPermission() !== "granted") { toast("Permission denied"); render(); return; }
           }
           s.notificationsEnabled = on; touch();
         })),
-      el("div", { class: "setting" },
+      el("div", { class: "set-row" },
         el("div", {}, el("div", { class: "s-label" }, "Currency symbol"), el("div", { class: "s-help" }, "Shown against every price on the Shopping list.")),
-        el("input", { type: "text", value: s.currencySymbol, style: "width:52px;text-align:center", onchange: (e) => { s.currencySymbol = e.target.value.slice(0, 3) || "£"; e.target.value = s.currencySymbol; touch(); render(); } })));
+        el("input", { type: "text", value: s.currencySymbol, onchange: (e) => { s.currencySymbol = e.target.value.slice(0, 3) || "£"; e.target.value = s.currencySymbol; touch(); render(); } })));
     view.append(block);
 
     view.append(syncBox());
@@ -655,8 +685,6 @@
     view.append(el("div", { class: "settings-actions" },
       el("button", { class: "btn", onclick: exportData }, "Export backup"),
       el("button", { class: "btn", onclick: importData }, "Import backup")));
-    view.append(el("p", { class: "s-help", style: "margin-top:14px;max-width:620px" },
-      "This device holds its own copy in the browser. With sync on, the copy in the Gist is the shared source of truth across your devices."));
     root.append(view);
   }
   function toggle(on, onChange) {
@@ -667,12 +695,12 @@
 
   function syncBox() {
     const cfg = Sync.config();
-    const box = el("div", { class: "sync-box" });
+    const box = el("div", { class: "sync-card" });
     box.append(el("h2", {}, "Sync across devices"));
-    box.append(el("p", { html: 'Paste a GitHub token with <b>gist</b> scope. Cadence keeps one private Gist and both this device and the Mac app read and write it. <a href="https://github.com/settings/tokens/new?scopes=gist&description=Cadence%20sync" target="_blank" rel="noopener">Create a token →</a>' }));
-    const token = el("input", { type: "password", placeholder: "ghp_… (gist scope)", value: cfg.token || "" });
-    const gid = el("input", { type: "text", placeholder: "gist id — leave blank to create one", value: cfg.gistId || "" });
-    const status = el("div", { class: "sync-status" });
+    box.append(el("p", { html: 'Paste a GitHub token with <b>gist</b> scope — Cadence keeps one private Gist that this device and the Mac app both read and write. <a href="https://github.com/settings/tokens/new?scopes=gist&description=Cadence%20sync" target="_blank" rel="noopener">Create a token →</a>' }));
+    const token = el("input", { type: "password", placeholder: "ghp_…", value: cfg.token || "" });
+    const gid = el("input", { type: "text", placeholder: "leave blank to create one", value: cfg.gistId || "" });
+    const status = el("div", { class: "sync-msg" });
     box.append(el("div", { class: "field" }, el("label", {}, "GitHub token"), token));
     box.append(el("div", { class: "field" }, el("label", {}, "Gist id"), gid));
     box.append(el("div", { class: "settings-actions" },
