@@ -34,7 +34,7 @@ under *Build and deployment*, set **Source: Deploy from a branch**, **Branch:
 
 Wait about a minute. Your app is now live at:
 
-> **https://i-jarz29.github.io/cadence/**
+> **https://i-jarz29.github.io/Cadence/**
 
 ---
 
