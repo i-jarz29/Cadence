@@ -4,6 +4,10 @@ The same tracker as the Mac app, as a website you install to your phone's home
 screen. It opens full-screen with no browser bars, works offline once loaded, and
 — with sync switched on — shares one dataset with the Mac app.
 
+Categories include a **Wake up** alongside **Sleep** for building out a
+timetable, and every planned block has a **bell** for a one-off "remind me in
+X minutes/hours" — separate from, and in addition to, the template's own nudge.
+
 Everything is static: HTML, CSS and vanilla JS. No build step, no framework.
 
 | File | Purpose |

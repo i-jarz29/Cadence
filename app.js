@@ -10,6 +10,7 @@
 
   const CATEGORIES = [
     { id: "sleep", name: "Sleep",     color: "var(--cat-sleep)" },
+    { id: "wake",  name: "Wake up",   color: "var(--cat-wake)"  },
     { id: "meal",  name: "Meal",      color: "var(--cat-meal)"  },
     { id: "class", name: "Class",     color: "var(--cat-class)" },
     { id: "gym",   name: "Gym",       color: "var(--cat-gym)"   },
@@ -31,7 +32,7 @@
 
   const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const WD_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const TRACKED = ["sleep", "meal", "class", "gym", "mma", "zap", "prep", "study"];
+  const TRACKED = ["sleep", "wake", "meal", "class", "gym", "mma", "zap", "prep", "study"];
 
   const DEFAULT_SETTINGS = {
     dayStartHour: 6, dayEndHour: 24, nudgeLeadMin: 15,
@@ -155,6 +156,85 @@
     p.className = "sync-pill" + (state ? " " + state : "");
     p.textContent = text;
   };
+
+  // ---------------------------------------------------------------- reminders
+  // "Remind me in X" — a one-off nudge on top of a planned block, separate from
+  // the template's own nudge time. Lives only on this device (not synced):
+  // it's tied to a moment on this phone or this Mac, not to the shared plan.
+
+  const REM_KEY = "cadence.reminders";
+  let reminders = [];
+  try { const a = JSON.parse(localStorage.getItem(REM_KEY)); if (Array.isArray(a)) reminders = a; } catch {}
+  const saveReminders = () => { try { localStorage.setItem(REM_KEY, JSON.stringify(reminders)); } catch {} };
+  const reminderFor = (blockId) => reminders.find((r) => r.blockId === blockId) || null;
+  const clearReminder = (id) => { reminders = reminders.filter((r) => r.id !== id); saveReminders(); };
+
+  async function ensureNotifyPermission() {
+    if (!("Notification" in window)) return false;
+    if (Notification.permission === "granted") return true;
+    if (Notification.permission === "denied") return false;
+    return (await Notification.requestPermission()) === "granted";
+  }
+
+  async function setReminder(block, minutes) {
+    const granted = await ensureNotifyPermission();
+    if (!granted) toast("Allow notifications to be reminded");
+    reminders = reminders.filter((r) => r.blockId !== block.id);
+    reminders.push({ id: uid(), blockId: block.id, label: block.label || catName(block.category),
+      category: block.category, fireAt: Date.now() + minutes * 60000 });
+    saveReminders();
+    toast(`Reminder set for ${fmtDur(minutes)}`);
+  }
+
+  function checkReminders() {
+    if (!reminders.length) return;
+    const now = Date.now();
+    const due = reminders.filter((r) => r.fireAt <= now);
+    if (!due.length) return;
+    reminders = reminders.filter((r) => r.fireAt > now);
+    saveReminders();
+    for (const r of due) {
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification(r.label, { body: "You asked to be reminded about this.", tag: "cadence-rem-" + r.id });
+      } else {
+        toast(`Reminder: ${r.label}`);
+      }
+    }
+    if (app.view === "today") render();
+  }
+
+  function openReminderSheet(block) {
+    const existing = reminderFor(block.id);
+    let unit = "min";
+    const amountI = el("input", { type: "text", inputmode: "numeric", placeholder: "e.g. 20" });
+    const segMin = el("button", { class: "active", onclick: () => { unit = "min"; segMin.classList.add("active"); segHr.classList.remove("active"); } }, "Minutes");
+    const segHr = el("button", { onclick: () => { unit = "hr"; segHr.classList.add("active"); segMin.classList.remove("active"); } }, "Hours");
+    const go = async (mins) => { await setReminder(block, mins); closeSheet(); render(); };
+    const chips = el("div", { class: "rem-chips" },
+      ...[10, 20, 30, 60, 120].map((m) => el("button", { class: "chip", onclick: () => go(m) }, m < 60 ? `${m}m` : `${m / 60}h`)));
+
+    const customBtn = el("button", { class: "btn primary", onclick: () => {
+      const n = parseAmount(amountI.value);
+      if (!n || n <= 0) { toast("Enter how many " + (unit === "hr" ? "hours" : "minutes")); return; }
+      go(Math.round(unit === "hr" ? n * 60 : n));
+    } }, "Set reminder");
+
+    const cancelBtn = existing
+      ? el("button", { class: "btn ghost small", onclick: () => { clearReminder(existing.id); closeSheet(); render(); toast("Reminder cancelled"); } }, "Cancel reminder")
+      : el("span");
+
+    const body = el("div", {},
+      el("h2", {}, "Remind me — " + (block.label || catName(block.category))),
+      existing ? el("p", { class: "s-help", style: "margin:-6px 0 12px" },
+        `Already set for ${new Date(existing.fireAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Setting a new one replaces it.`) : null,
+      el("div", { class: "field" }, el("label", {}, "Quick pick"), chips),
+      el("div", { class: "field" }, el("label", {}, "Or an exact amount"),
+        el("div", { style: "display:flex;gap:8px" }, amountI, el("div", { class: "seg" }, segMin, segHr))),
+      el("div", { class: "sheet-actions" },
+        cancelBtn,
+        el("div", { class: "right" }, el("button", { class: "btn", onclick: closeSheet }, "Close"), customBtn)));
+    showSheet(body);
+  }
 
   // ---------------------------------------------------------------- day model
 
@@ -283,6 +363,7 @@
     return n;
   };
   const CHECK = '<path d="M20 6 9 17l-5-5"/>';
+  const BELL = '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>';
 
   function head(parent, title, sub, right) {
     parent.append(el("div", { class: "view-head" },
@@ -352,14 +433,20 @@
       tag = el("span", { class: "tag extra" }, "unplanned");
     }
     const showDone = kind === "planned" && (!rMatch || rMatch.kind === "planned-only");
+    const rem = kind === "planned" ? reminderFor(b.id) : null;
+    if (rem) {
+      const mins = Math.max(0, Math.round((rem.fireAt - Date.now()) / 60000));
+      tag = el("span", { class: "tag rem" }, `⏰ ${mins < 1 ? "<1m" : fmtDur(mins)}`);
+    }
     return el("div", { class: "block", style: catStyle(b.category),
-      onclick: (e) => { if (!e.target.closest(".b-done")) openBlockSheet({ mode: kind, dateKey: key, block: b }); } },
+      onclick: (e) => { if (!e.target.closest(".b-done") && !e.target.closest(".b-bell")) openBlockSheet({ mode: kind, dateKey: key, block: b }); } },
       el("div", { class: "b-main" },
         el("div", { class: "b-title" }, el("span", { class: "b-label" }, b.label || catName(b.category)), tag),
         el("div", { class: "b-meta" },
           el("span", { class: "mono" }, fmtRange(b.start, b.end)),
           el("span", { class: "dot" }), catName(b.category),
           el("span", { class: "dot" }), fmtDur(spanMin(b.start, b.end)))),
+      kind === "planned" && el("button", { class: "b-bell" + (rem ? " active" : ""), title: rem ? "Change reminder" : "Remind me later", onclick: () => openReminderSheet(b) }, svg(BELL)),
       showDone && el("button", { class: "b-done", title: "Done now", onclick: () => markDone(b, key) }, svg(CHECK)));
   }
 
@@ -830,7 +917,7 @@
       }
     }
   }
-  setInterval(checkNudges, 20000);
+  setInterval(() => { checkNudges(); checkReminders(); }, 20000);
   let lastDay = todayKey();
   setInterval(() => {
     if (!$("#scrim").hidden) return;
@@ -838,7 +925,7 @@
     if (rolled && app.view === "today") app.date = todayKey();
     if (app.view === "week" || (app.view === "today" && app.date === todayKey())) render();
   }, 60000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { Sync.pull().catch(() => {}); checkNudges(); } });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { Sync.pull().catch(() => {}); checkNudges(); checkReminders(); } });
   window.addEventListener("online", () => Sync.push(data).catch(() => {}));
 
   // ---------------------------------------------------------------- boot
@@ -850,5 +937,6 @@
   Sync.init();
   setView("today");
   Sync.pull().catch(() => {});
+  checkReminders();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 })();

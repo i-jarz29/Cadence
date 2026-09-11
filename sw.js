@@ -2,7 +2,7 @@
  * The shell is cached; GitHub API calls always go to the network.
  * Bump CACHE when you change any shell file so devices pick the new version up. */
 
-const CACHE = "cadence-shell-v4";
+const CACHE = "cadence-shell-v5";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./sync.js",
   "./manifest.webmanifest",
